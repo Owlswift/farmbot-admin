@@ -5,11 +5,11 @@ import {
   ShoppingCartIcon,
   UsersIcon,
   CurrencyDollarIcon,
-  ChartBarIcon,
+  CubeIcon,
   ArrowTrendingUpIcon,
   ArrowTrendingDownIcon,
 } from "@heroicons/react/24/outline";
-import { useState, useEffect } from "react";
+import { useDashboardStats, useSalesData } from "@/lib/hooks/use-dashboard";
 import {
   LineChart,
   Line,
@@ -18,116 +18,70 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  BarChart,
-  Bar,
 } from "recharts";
 import { format } from "date-fns";
 
-const stats = [
-  {
-    name: "Total Orders",
-    value: "2,542",
-    change: "+12%",
-    changeType: "positive",
-    icon: ShoppingCartIcon,
-  },
-  {
-    name: "Active Customers",
-    value: "1,234",
-    change: "+8%",
-    changeType: "positive",
-    icon: UsersIcon,
-  },
-  {
-    name: "Revenue",
-    value: "₦4.8M",
-    change: "+23%",
-    changeType: "positive",
-    icon: CurrencyDollarIcon,
-  },
-  {
-    name: "Conversion Rate",
-    value: "68%",
-    change: "-2%",
-    changeType: "negative",
-    icon: ChartBarIcon,
-  },
-];
-
-const recentOrders = [
-  {
-    id: "ORD-001",
-    customer: "John Doe",
-    amount: "₦15,400",
-    status: "Delivered",
-    date: "2024-01-15",
-  },
-  {
-    id: "ORD-002",
-    customer: "Jane Smith",
-    amount: "₦8,750",
-    status: "Processing",
-    date: "2024-01-15",
-  },
-  {
-    id: "ORD-003",
-    customer: "Mike Johnson",
-    amount: "₦22,100",
-    status: "Pending",
-    date: "2024-01-14",
-  },
-  {
-    id: "ORD-004",
-    customer: "Sarah Williams",
-    amount: "₦12,500",
-    status: "Delivered",
-    date: "2024-01-14",
-  },
-  {
-    id: "ORD-005",
-    customer: "David Brown",
-    amount: "₦18,300",
-    status: "Cancelled",
-    date: "2024-01-13",
-  },
-];
-
-const salesData = [
-  { month: "Jan", sales: 4000 },
-  { month: "Feb", sales: 3000 },
-  { month: "Mar", sales: 5000 },
-  { month: "Apr", sales: 2780 },
-  { month: "May", sales: 1890 },
-  { month: "Jun", sales: 2390 },
-];
-
 export default function DashboardPage() {
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: dashboardStats, isLoading: statsLoading } = useDashboardStats();
+  const { data: salesData, isLoading: salesLoading } = useSalesData("month");
 
-  useEffect(() => {
-    // Simulate loading
-    setTimeout(() => setIsLoading(false), 1000);
-  }, []);
+  const stats = dashboardStats
+    ? [
+        {
+          name: "Total Revenue",
+          value: `₦${dashboardStats.totalRevenue.toLocaleString()}`,
+          change: `${dashboardStats.revenueGrowth > 0 ? "+" : ""}${
+            dashboardStats.revenueGrowth
+          }%`,
+          changeType:
+            dashboardStats.revenueGrowth > 0 ? "positive" : "negative",
+          icon: CurrencyDollarIcon,
+        },
+        {
+          name: "Total Orders",
+          value: dashboardStats.totalOrders.toLocaleString(),
+          change: `${dashboardStats.orderGrowth > 0 ? "+" : ""}${
+            dashboardStats.orderGrowth
+          }%`,
+          changeType: dashboardStats.orderGrowth > 0 ? "positive" : "negative",
+          icon: ShoppingCartIcon,
+        },
+        {
+          name: "Total Customers",
+          value: dashboardStats.totalCustomers.toLocaleString(),
+          change: `${dashboardStats.customerGrowth > 0 ? "+" : ""}${
+            dashboardStats.customerGrowth
+          }%`,
+          changeType:
+            dashboardStats.customerGrowth > 0 ? "positive" : "negative",
+          icon: UsersIcon,
+        },
+        {
+          name: "Total Products",
+          value: dashboardStats.totalProducts.toLocaleString(),
+          change: "+12%",
+          changeType: "positive",
+          icon: CubeIcon,
+        },
+      ]
+    : [];
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "Delivered":
-        return "bg-green-100 text-green-800";
-      case "Processing":
-        return "bg-blue-100 text-blue-800";
-      case "Pending":
-        return "bg-yellow-100 text-yellow-800";
-      case "Cancelled":
-        return "bg-red-100 text-red-800";
-      default:
-        return "bg-gray-100 text-gray-800";
-    }
-  };
-
-  if (isLoading) {
+  if (statsLoading) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
+      <div className="space-y-6">
+        <div className="h-8 bg-gray-200 rounded w-1/4 animate-pulse"></div>
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <div
+              key={i}
+              className="bg-white rounded-lg p-6 shadow animate-pulse"
+            >
+              <div className="h-4 bg-gray-200 rounded w-1/2 mb-4"></div>
+              <div className="h-8 bg-gray-200 rounded w-1/4 mb-2"></div>
+              <div className="h-4 bg-gray-200 rounded w-1/3"></div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -139,8 +93,8 @@ export default function DashboardPage() {
           Dashboard Overview
         </h1>
         <p className="mt-2 text-sm text-gray-700">
-          Welcome back! Here&rsquo;s what&rsquo;s happening with your farm
-          produce orders today.
+          Welcome back! Here&#39;s what&#39;s happening with your farm produce
+          orders today.
         </p>
       </div>
 
@@ -193,137 +147,69 @@ export default function DashboardPage() {
             Sales Overview
           </h3>
           <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={salesData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
-                <Tooltip />
-                <Line
-                  type="monotone"
-                  dataKey="sales"
-                  stroke="#10B981"
-                  strokeWidth={2}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            {salesLoading ? (
+              <div className="h-full flex items-center justify-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={salesData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={(date) => format(new Date(date), "MMM d")}
+                  />
+                  <YAxis />
+                  <Tooltip
+                    labelFormatter={(date) =>
+                      format(new Date(date), "MMM d, yyyy")
+                    }
+                    formatter={(value) => [
+                      `₦${value?.toLocaleString()}`,
+                      "Revenue",
+                    ]}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="revenue"
+                    stroke="#10B981"
+                    strokeWidth={2}
+                    dot={{ fill: "#10B981", strokeWidth: 2 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
-        {/* Orders Chart */}
+        {/* Top Products */}
         <div className="bg-white p-6 rounded-lg shadow">
           <h3 className="text-lg font-medium text-gray-900 mb-4">
-            Recent Orders
+            Top Products
           </h3>
           <div className="space-y-4">
-            {recentOrders.map((order) => (
+            {dashboardStats?.topProducts?.map((product, index) => (
               <div
-                key={order.id}
+                key={product.id}
                 className="flex items-center justify-between py-3 border-b last:border-0"
               >
-                <div>
-                  <p className="font-medium text-gray-900">{order.id}</p>
-                  <p className="text-sm text-gray-500">{order.customer}</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-semibold text-gray-900">{order.amount}</p>
-                  <span
-                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
-                      order.status
-                    )}`}
-                  >
-                    {order.status}
+                <div className="flex items-center">
+                  <span className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-800 font-medium mr-3">
+                    {index + 1}
                   </span>
+                  <div>
+                    <p className="font-medium text-gray-900">{product.name}</p>
+                    <p className="text-sm text-gray-500">
+                      {product.sales} sales
+                    </p>
+                  </div>
                 </div>
+                <p className="font-semibold text-gray-900">
+                  ₦{product.revenue.toLocaleString()}
+                </p>
               </div>
             ))}
           </div>
-        </div>
-      </div>
-
-      {/* Recent Activity */}
-      <div className="bg-white shadow rounded-lg">
-        <div className="px-4 py-5 sm:px-6">
-          <h3 className="text-lg font-medium leading-6 text-gray-900">
-            Recent WhatsApp Orders
-          </h3>
-          <p className="mt-1 text-sm text-gray-500">
-            Latest orders from your WhatsApp bot
-          </p>
-        </div>
-        <div className="border-t border-gray-200">
-          <table className="min-w-full divide-y divide-gray-300">
-            <thead className="bg-gray-50">
-              <tr>
-                <th
-                  scope="col"
-                  className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900"
-                >
-                  Order ID
-                </th>
-                <th
-                  scope="col"
-                  className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900"
-                >
-                  Customer
-                </th>
-                <th
-                  scope="col"
-                  className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900"
-                >
-                  Products
-                </th>
-                <th
-                  scope="col"
-                  className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900"
-                >
-                  Total
-                </th>
-                <th
-                  scope="col"
-                  className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900"
-                >
-                  Status
-                </th>
-                <th
-                  scope="col"
-                  className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900"
-                >
-                  Date
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 bg-white">
-              {recentOrders.map((order) => (
-                <tr key={order.id}>
-                  <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900">
-                    {order.id}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                    {order.customer}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                    3 items
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                    {order.amount}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-4 text-sm">
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
-                        order.status
-                      )}`}
-                    >
-                      {order.status}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                    {format(new Date(order.date), "MMM d, yyyy")}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       </div>
     </div>

@@ -1,16 +1,16 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-// components/ProductForm.tsx
+// components/ProductForm.tsx - UPDATED VERSION
 "use client";
 
 import { useState, useCallback } from "react";
 import {
   XMarkIcon,
   PhotoIcon,
-  CloudArrowUpIcon,
+  VideoCameraIcon,
 } from "@heroicons/react/24/outline";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import toast from "react-hot-toast";
 
 /* ----------------------------- */
 /* Schema */
@@ -20,17 +20,20 @@ const productSchema = z.object({
   name: z.string().min(2, "Product name must be at least 2 characters"),
   description: z.string().optional(),
   category: z.string().min(1, "Please select a category"),
+  catalogRetailerId: z.string().min(1, "Catalog retailer Id is required"),
   price: z
     .string()
-    .min(1, "Price is required")
-    .regex(/^\d+$/, "Price must be a valid number"),
+    .min(1, "Checkout price is required")
+    .regex(/^\d+$/, "Checkout price must be a valid number"),
   stock: z
     .string()
     .min(1, "Stock is required")
     .regex(/^\d+$/, "Stock must be a valid number"),
   unit: z.string().min(1, "Unit is required"),
-  images: z.array(z.string()).optional(),
+  images: z.array(z.string()).min(1, "At least one image is required"),
+  videos: z.array(z.string()).optional(),
   isActive: z.boolean(),
+  syncToCatalog: z.boolean().optional().default(true),
 });
 
 export type ProductFormData = z.infer<typeof productSchema>;
@@ -42,7 +45,8 @@ export type ProductFormData = z.infer<typeof productSchema>;
 interface ProductFormProps {
   product?: any | null;
   onClose: () => void;
-  onSubmit: (data: ProductFormData) => Promise<void> | void;
+  onSubmit: (data: ProductFormData) => Promise<void>;
+  isSubmitting?: boolean;
 }
 
 const categories = [
@@ -67,84 +71,214 @@ const units = [
 ];
 
 /* ----------------------------- */
+/* Cloudinary Configuration */
+/* ----------------------------- */
+
+const CLOUDINARY_CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+const CLOUDINARY_UPLOAD_PRESET =
+  process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+
+const uploadToCloudinary = async (
+  file: File,
+  type: "image" | "video"
+): Promise<string> => {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append(
+    "upload_preset",
+    CLOUDINARY_UPLOAD_PRESET || "farmbot_products"
+  );
+
+  formData.append("resource_type", type === "video" ? "video" : "image");
+
+  if (type === "image") {
+    formData.append("quality", "auto");
+    formData.append("fetch_format", "auto");
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${
+        type === "video" ? "video" : "image"
+      }/upload`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Upload failed");
+    }
+
+    const data = await response.json();
+    return data.secure_url;
+  } catch (error) {
+    console.error("Cloudinary upload error:", error);
+    throw error;
+  }
+};
+
+/* ----------------------------- */
 /* Component */
 /* ----------------------------- */
 
-export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [uploadingImage, setUploadingImage] = useState(false);
+export function ProductForm({
+  product,
+  onClose,
+  onSubmit,
+  isSubmitting = false,
+}: ProductFormProps) {
+  const [uploadingMedia, setUploadingMedia] = useState<{
+    type: "image" | "video";
+    index?: number;
+  } | null>(null);
 
   const {
     register,
     handleSubmit,
     control,
     watch,
-    reset,
     setValue,
     formState: { errors, isDirty },
   } = useForm<ProductFormData>({
     resolver: zodResolver(productSchema),
-    defaultValues: {
-      name: "",
-      description: "",
-      category: "",
-      price: "",
-      stock: "",
-      unit: "kg",
-      images: [],
-      isActive: true,
-    },
+    defaultValues: product
+      ? {
+          name: product.name || "",
+          description: product.description || "",
+          category: product.category || "",
+          catalogRetailerId: product.catalogRetailerId,
+          price: product.price?.toString() || product.price?.toString() || "",
+          stock: product.stock?.toString() || "",
+          unit: product.unit || "kg",
+          images: product.images || [],
+          videos: product.videos || [],
+          isActive: product.isActive !== false,
+          syncToCatalog: product.syncToCatalog !== false,
+        }
+      : {
+          name: "",
+          description: "",
+          category: "",
+          catalogRetailerId: "",
+          price: "",
+          stock: "",
+          unit: "kg",
+          images: [],
+          videos: [],
+          isActive: true,
+          syncToCatalog: true,
+        },
   });
 
   /* ----------------------------- */
-  /* Image Upload */
+  /* Media Upload Handlers */
   /* ----------------------------- */
 
-  const handleImageUpload = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMediaUpload = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>, type: "image" | "video") => {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      setUploadingImage(true);
-      const reader = new FileReader();
+      const maxSize = type === "video" ? 50 * 1024 * 1024 : 5 * 1024 * 1024;
+      if (file.size > maxSize) {
+        toast.error(
+          `${type === "video" ? "Video" : "Image"} is too large. Max size: ${
+            type === "video" ? "50MB" : "5MB"
+          }`
+        );
+        return;
+      }
 
-      reader.onloadend = () => {
-        const currentImages = watch("images") ?? [];
-        setValue("images", [...currentImages, reader.result as string], {
-          shouldDirty: true,
-        });
-        setUploadingImage(false);
-      };
+      const validImageTypes = [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+      ];
+      const validVideoTypes = ["video/mp4", "video/webm", "video/ogg"];
 
-      reader.readAsDataURL(file);
+      if (type === "image" && !validImageTypes.includes(file.type)) {
+        toast.error("Please upload a valid image (JPEG, PNG, WebP, GIF)");
+        return;
+      }
+
+      if (type === "video" && !validVideoTypes.includes(file.type)) {
+        toast.error("Please upload a valid video (MP4, WebM, OGG)");
+        return;
+      }
+
+      setUploadingMedia({ type });
+
+      try {
+        const url = await uploadToCloudinary(file, type);
+
+        if (type === "image") {
+          const currentImages = watch("images") || [];
+          setValue("images", [...currentImages, url], {
+            shouldValidate: true,
+            shouldDirty: true,
+          });
+          toast.success("Image uploaded successfully!");
+        } else {
+          const currentVideos = watch("videos") || [];
+          setValue("videos", [...currentVideos, url], {
+            shouldValidate: true,
+            shouldDirty: true,
+          });
+          toast.success("Video uploaded successfully!");
+        }
+      } catch (error) {
+        toast.error(`Failed to upload ${type}. Please try again.`);
+        console.error(`Upload error:`, error);
+      } finally {
+        setUploadingMedia(null);
+        e.target.value = "";
+      }
     },
     [setValue, watch]
   );
 
-  const removeImage = useCallback(
-    (index: number) => {
-      const currentImages = watch("images") ?? [];
-      setValue(
-        "images",
-        currentImages.filter((_, i) => i !== index),
-        { shouldDirty: true }
-      );
+  const removeMedia = useCallback(
+    (index: number, type: "image" | "video") => {
+      if (type === "image") {
+        const currentImages = watch("images") || [];
+        setValue(
+          "images",
+          currentImages.filter((_, i) => i !== index),
+          {
+            shouldValidate: true,
+            shouldDirty: true,
+          }
+        );
+      } else {
+        const currentVideos = watch("videos") || [];
+        setValue(
+          "videos",
+          currentVideos.filter((_, i) => i !== index),
+          {
+            shouldValidate: true,
+            shouldDirty: true,
+          }
+        );
+      }
     },
     [setValue, watch]
   );
-
-  /* ----------------------------- */
-  /* Submit */
-  /* ----------------------------- */
 
   const handleFormSubmit = async (data: ProductFormData) => {
     try {
-      setIsSubmitting(true);
-      await onSubmit(data);
+      // Convert string prices to numbers
+      const formattedData = {
+        ...data,
+        catalogRetailerId: data.catalogRetailerId,
+        price: parseInt(data.price),
+        stock: parseInt(data.stock),
+      };
+      await onSubmit(formattedData);
     } catch (error) {
-      console.error("Submit error:", error);
-    } finally {
-      setIsSubmitting(false);
+      console.error("Form submission error:", error);
     }
   };
 
@@ -153,7 +287,7 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="flex min-h-full items-center justify-center p-4 text-center">
-        {/* Backdrop with blur effect */}
+        {/* Backdrop */}
         <div
           className="fixed inset-0 bg-black/50 backdrop-blur-sm transition-opacity"
           onClick={onClose}
@@ -197,50 +331,61 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900">
-                      Product Images
+                      Product Images *
                     </h3>
                     <p className="text-sm text-gray-500">
-                      Upload clear photos of your product
+                      Upload clear photos of your product. At least one image is
+                      required.
                     </p>
                   </div>
-                  <span className="text-xs text-gray-400">Max 5 images</span>
+                  <span className="text-xs text-gray-400">
+                    Max 5 images • 5MB each
+                  </span>
                 </div>
 
+                {errors.images && (
+                  <p className="text-sm text-red-600 flex items-center gap-1">
+                    <span>⚠</span> {errors.images.message}
+                  </p>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {/* Upload Card */}
+                  {/* Image Upload Card */}
                   <label
                     className={`
                     relative group flex flex-col items-center justify-center 
                     h-48 border-2 border-dashed rounded-xl cursor-pointer
                     transition-all duration-200
                     ${
-                      uploadingImage
+                      uploadingMedia?.type === "image"
                         ? "bg-blue-50 border-blue-200"
-                        : "bg-gray-50 border-gray-200 hover:border-blue-300 hover:bg-blue-50"
+                        : "bg-gray-50 border-gray-200 hover:border-green-300 hover:bg-green-50"
                     }
                   `}
                   >
                     <input
                       type="file"
                       className="hidden"
-                      accept="image/*"
-                      onChange={handleImageUpload}
-                      disabled={isSubmitting || uploadingImage}
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      onChange={(e) => handleMediaUpload(e, "image")}
+                      disabled={
+                        isSubmitting || uploadingMedia?.type === "image"
+                      }
                     />
                     <div className="flex flex-col items-center justify-center space-y-3">
-                      {uploadingImage ? (
-                        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500" />
+                      {uploadingMedia?.type === "image" ? (
+                        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-green-500" />
                       ) : (
                         <>
-                          <div className="p-3 bg-blue-100 rounded-full">
-                            <CloudArrowUpIcon className="h-6 w-6 text-blue-600" />
+                          <div className="p-3 bg-green-100 rounded-full">
+                            <PhotoIcon className="h-6 w-6 text-green-600" />
                           </div>
                           <div className="text-center">
                             <p className="text-sm font-medium text-gray-700">
                               Upload Image
                             </p>
                             <p className="text-xs text-gray-500 mt-1">
-                              PNG, JPG, WEBP
+                              JPEG, PNG, WebP
                             </p>
                           </div>
                         </>
@@ -249,7 +394,7 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                   </label>
 
                   {/* Image Previews */}
-                  {(formValues.images ?? []).map((image, index) => (
+                  {(formValues.images || []).map((image, index) => (
                     <div
                       key={index}
                       className="relative group h-48 rounded-xl overflow-hidden bg-gray-100"
@@ -258,12 +403,17 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                         src={image}
                         className="w-full h-full object-cover transition-transform group-hover:scale-105"
                         alt={`Product ${index + 1}`}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src =
+                            "/api/placeholder/400/300";
+                        }}
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                       <button
                         type="button"
-                        onClick={() => removeImage(index)}
-                        className="absolute top-3 right-3 bg-red-500 text-white p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                        onClick={() => removeMedia(index, "image")}
+                        disabled={isSubmitting}
+                        className="absolute top-3 right-3 bg-red-500 text-white p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 disabled:opacity-50"
                       >
                         <XMarkIcon className="h-4 w-4" />
                       </button>
@@ -272,7 +422,92 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                 </div>
               </div>
 
-              {/* Section 2: Basic Information */}
+              {/* Section 2: Product Videos */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Product Videos
+                    </h3>
+                    <p className="text-sm text-gray-500">
+                      Optional: Upload short videos showcasing your product
+                    </p>
+                  </div>
+                  <span className="text-xs text-gray-400">
+                    Max 2 videos • 50MB each
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Video Upload Card */}
+                  <label
+                    className={`
+                    relative group flex flex-col items-center justify-center 
+                    h-48 border-2 border-dashed rounded-xl cursor-pointer
+                    transition-all duration-200
+                    ${
+                      uploadingMedia?.type === "video"
+                        ? "bg-blue-50 border-blue-200"
+                        : "bg-gray-50 border-gray-200 hover:border-blue-300 hover:bg-blue-50"
+                    }
+                  `}
+                  >
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="video/mp4,video/webm,video/ogg"
+                      onChange={(e) => handleMediaUpload(e, "video")}
+                      disabled={
+                        isSubmitting || uploadingMedia?.type === "video"
+                      }
+                    />
+                    <div className="flex flex-col items-center justify-center space-y-3">
+                      {uploadingMedia?.type === "video" ? (
+                        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500" />
+                      ) : (
+                        <>
+                          <div className="p-3 bg-blue-100 rounded-full">
+                            <VideoCameraIcon className="h-6 w-6 text-blue-600" />
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm font-medium text-gray-700">
+                              Upload Video
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              MP4, WebM, OGG
+                            </p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </label>
+
+                  {/* Video Previews */}
+                  {(formValues.videos || []).map((video, index) => (
+                    <div
+                      key={index}
+                      className="relative group h-48 rounded-xl overflow-hidden bg-gray-100"
+                    >
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="p-4 bg-black/50 rounded-full">
+                          <VideoCameraIcon className="h-8 w-8 text-white" />
+                        </div>
+                      </div>
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <button
+                        type="button"
+                        onClick={() => removeMedia(index, "video")}
+                        disabled={isSubmitting}
+                        className="absolute top-3 right-3 bg-red-500 text-white p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 disabled:opacity-50"
+                      >
+                        <XMarkIcon className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Section 3: Basic Information */}
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-gray-900">
                   Basic Information
@@ -289,13 +524,14 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                       placeholder="e.g., Fresh Organic Tomatoes"
                       className={`
                         w-full px-4 py-3 rounded-lg border transition-colors
-                        focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none
+                        focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none
                         ${
                           errors.name
                             ? "border-red-300 bg-red-50"
                             : "border-gray-200 hover:border-gray-300"
                         }
                       `}
+                      disabled={isSubmitting}
                     />
                     {errors.name && (
                       <p className="text-sm text-red-600 flex items-center gap-1">
@@ -314,13 +550,14 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                         {...register("category")}
                         className={`
                           w-full px-4 py-3 rounded-lg border appearance-none bg-white
-                          focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none
+                          focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none
                           ${
                             errors.category
                               ? "border-red-300 bg-red-50"
                               : "border-gray-200 hover:border-gray-300"
                           }
                         `}
+                        disabled={isSubmitting}
                       >
                         <option value="">Select category</option>
                         {categories.map((cat) => (
@@ -361,23 +598,55 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                       {...register("description")}
                       rows={3}
                       placeholder="Describe your product (quality, source, special features)"
-                      className="w-full px-4 py-3 rounded-lg border border-gray-200 hover:border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none"
+                      className="w-full px-4 py-3 rounded-lg border border-gray-200 hover:border-gray-300 focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none resize-none"
+                      disabled={isSubmitting}
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Section 3: Pricing & Inventory */}
+              {/* Section 4: Pricing & Inventory */}
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-gray-900">
                   Pricing & Inventory
                 </h3>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {/* Price */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                  {/* Catalog Price (Reference Price) */}
                   <div className="space-y-2">
                     <label className="block text-sm font-medium text-gray-700">
-                      Price (₦) *
+                      Catalog Retailer ID
+                    </label>
+                    <div className="relative">
+                      <input
+                        {...register("catalogRetailerId")}
+                        placeholder="0.00"
+                        className={`
+                          w-full pl-10 pr-4 py-3 rounded-lg border transition-colors
+                          focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none
+                          ${
+                            errors.catalogRetailerId
+                              ? "border-red-300 bg-red-50"
+                              : "border-gray-200 hover:border-gray-300"
+                          }
+                        `}
+                        disabled={isSubmitting}
+                      />
+                    </div>
+                    {errors.catalogRetailerId && (
+                      <p className="text-sm text-red-600 flex items-center gap-1">
+                        <span>⚠</span> {errors.catalogRetailerId.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Checkout Price (Current Price) */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Checkout Price (₦) *
+                      <span className="text-xs text-gray-500 ml-2">
+                        Actual selling price
+                      </span>
                     </label>
                     <div className="relative">
                       <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">
@@ -388,13 +657,14 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                         placeholder="0.00"
                         className={`
                           w-full pl-10 pr-4 py-3 rounded-lg border transition-colors
-                          focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none
+                          focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none
                           ${
                             errors.price
                               ? "border-red-300 bg-red-50"
                               : "border-gray-200 hover:border-gray-300"
                           }
                         `}
+                        disabled={isSubmitting}
                       />
                     </div>
                     {errors.price && (
@@ -414,13 +684,14 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                       placeholder="e.g., 100"
                       className={`
                         w-full px-4 py-3 rounded-lg border transition-colors
-                        focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none
+                        focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none
                         ${
                           errors.stock
                             ? "border-red-300 bg-red-50"
                             : "border-gray-200 hover:border-gray-300"
                         }
                       `}
+                      disabled={isSubmitting}
                     />
                     {errors.stock && (
                       <p className="text-sm text-red-600 flex items-center gap-1">
@@ -439,13 +710,14 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                         {...register("unit")}
                         className={`
                           w-full px-4 py-3 rounded-lg border appearance-none bg-white
-                          focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none
+                          focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none
                           ${
                             errors.unit
                               ? "border-red-300 bg-red-50"
                               : "border-gray-200 hover:border-gray-300"
                           }
                         `}
+                        disabled={isSubmitting}
                       >
                         {units.map((unit) => (
                           <option key={unit.value} value={unit.value}>
@@ -478,7 +750,42 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                 </div>
               </div>
 
-              {/* Section 4: Availability */}
+              {/* Section 5: WhatsApp Catalog Sync */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  WhatsApp Catalog Sync
+                </h3>
+
+                <div className="flex items-center space-x-3 p-4 bg-blue-50 rounded-xl">
+                  <Controller
+                    name="syncToCatalog"
+                    control={control}
+                    render={({ field }) => (
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={field.value}
+                          onChange={(e) => field.onChange(e.target.checked)}
+                          className="sr-only peer"
+                          disabled={isSubmitting}
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600 disabled:opacity-50"></div>
+                      </label>
+                    )}
+                  />
+                  <div>
+                    <span className="font-medium text-gray-900">
+                      Sync to WhatsApp Catalog
+                    </span>
+                    <p className="text-sm text-gray-500">
+                      When enabled, this product will appear in your WhatsApp
+                      Business catalog
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 6: Availability */}
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-gray-900">
                   Availability
@@ -495,8 +802,9 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                           checked={field.value}
                           onChange={(e) => field.onChange(e.target.checked)}
                           className="sr-only peer"
+                          disabled={isSubmitting}
                         />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600 disabled:opacity-50"></div>
                       </label>
                     )}
                   />
@@ -505,14 +813,13 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                       Product is available for purchase
                     </span>
                     <p className="text-sm text-gray-500">
-                      When disabled, customers won&#39;t see this product in
-                      WhatsApp bot
+                      When disabled, customers won&#39;t see this product
                     </p>
                   </div>
                 </div>
               </div>
 
-              {/* Section 5: WhatsApp Preview */}
+              {/* Section 7: WhatsApp Preview */}
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold text-gray-900">
                   WhatsApp Preview
@@ -548,10 +855,18 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                         <h4 className="font-semibold text-gray-900">
                           {formValues.name || "Product Name"}
                         </h4>
-                        <div className="mt-2 space-y-1">
+                        <div className="mt-2 space-y-2">
                           <div className="flex items-center text-sm text-gray-600">
-                            <span className="font-medium">Price:</span>
+                            <span className="font-medium">
+                              Catalog Retailer ID:
+                            </span>
                             <span className="ml-2 font-semibold text-green-700">
+                              {formValues.catalogRetailerId}
+                            </span>
+                          </div>
+                          <div className="flex items-center text-sm text-gray-600">
+                            <span className="font-medium">Checkout Price:</span>
+                            <span className="ml-2 font-semibold text-blue-700">
                               ₦
                               {formValues.price
                                 ? parseInt(formValues.price).toLocaleString()
@@ -572,6 +887,23 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                                 ? "Available ✅"
                                 : "Not Available ❌"}
                             </span>
+                            <span
+                              className={`ml-2 px-2 py-0.5 rounded-full text-xs font-medium ${
+                                formValues.syncToCatalog
+                                  ? "bg-blue-100 text-blue-800"
+                                  : "bg-gray-100 text-gray-800"
+                              }`}
+                            >
+                              {formValues.syncToCatalog
+                                ? "In WhatsApp Catalog 📱"
+                                : "Not in Catalog"}
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-500 mt-2">
+                            📸 {formValues.images?.length || 0} photos
+                            {formValues.videos?.length
+                              ? ` • 🎬 ${formValues.videos.length} videos`
+                              : ""}
                           </div>
                         </div>
                       </div>
@@ -593,11 +925,13 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                   </button>
                   <button
                     type="submit"
-                    disabled={isSubmitting || !isDirty}
+                    disabled={
+                      isSubmitting || !isDirty || !formValues.images?.length
+                    }
                     className={`
                       px-8 py-3 rounded-lg font-medium transition-all
                       ${
-                        isSubmitting || !isDirty
+                        isSubmitting || !isDirty || !formValues.images?.length
                           ? "bg-gray-100 text-gray-400 cursor-not-allowed"
                           : "bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:shadow-lg hover:shadow-green-200"
                       }
@@ -624,7 +958,7 @@ export function ProductForm({ product, onClose, onSubmit }: ProductFormProps) {
                             d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                           />
                         </svg>
-                        Saving...
+                        {product ? "Updating..." : "Creating..."}
                       </span>
                     ) : product ? (
                       "Update Product"

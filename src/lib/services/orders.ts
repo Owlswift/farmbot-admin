@@ -193,6 +193,3 @@ export const orderService = {
     return response.data;
   },
 };
-
-
-pick up location instead of address

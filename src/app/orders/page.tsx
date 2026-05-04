@@ -584,47 +584,46 @@ export default function OrdersPage() {
                       )}
 
                       {/* Payment Receipt Image */}
-                      {selectedOrder.paymentReceiptUrl &&
-                        selectedOrder.status === "awaiting_verification" && (
-                          <div>
-                            <h3 className="text-sm font-medium text-gray-900 mb-2">
-                              Payment Receipt
-                            </h3>
-                            <div className="bg-gray-50 rounded-lg p-3">
-                              <img
-                                src={selectedOrder.paymentReceiptUrl}
-                                alt="Payment Receipt"
-                                className="w-full h-auto rounded-md border border-gray-200"
-                              />
-                            </div>
+                      {/* {selectedOrder.paymentReceiptUrl && */}
+                      {/* {selectedOrder.status === "awaiting_verification" && (
+                        <div>
+                          <h3 className="text-sm font-medium text-gray-900 mb-2">
+                            Payment Receipt
+                          </h3>
+                          <div className="bg-gray-50 rounded-lg p-3">
+                            <img
+                              src={selectedOrder.paymentReceiptUrl}
+                              alt="Payment Receipt"
+                              className="w-full h-auto rounded-md border border-gray-200"
+                            />
                           </div>
-                        )}
+                        </div>
+                      )} */}
 
                       {/* Action Buttons */}
                       <div className="pt-3 border-t space-y-3">
                         {/* Confirm Payment Button */}
-                        {selectedOrder.status === "awaiting_verification" &&
-                          selectedOrder.paymentReceiptUrl && (
-                            <button
-                              onClick={() =>
-                                confirmPaymentMutation.mutate(selectedOrder._id)
-                              }
-                              disabled={confirmPaymentMutation.isPending}
-                              className="w-full inline-flex justify-center items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50"
-                            >
-                              {confirmPaymentMutation.isPending ? (
-                                <>
-                                  <ArrowPathIcon className="animate-spin -ml-1 mr-2 h-4 w-4" />
-                                  Confirming...
-                                </>
-                              ) : (
-                                <>
-                                  <CheckIcon className="mr-2 h-4 w-4" />
-                                  Confirm Payment
-                                </>
-                              )}
-                            </button>
-                          )}
+                        {selectedOrder.status === "awaiting_verification" && (
+                          <button
+                            onClick={() =>
+                              confirmPaymentMutation.mutate(selectedOrder._id)
+                            }
+                            disabled={confirmPaymentMutation.isPending}
+                            className="w-full inline-flex justify-center items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50"
+                          >
+                            {confirmPaymentMutation.isPending ? (
+                              <>
+                                <ArrowPathIcon className="animate-spin -ml-1 mr-2 h-4 w-4" />
+                                Confirming...
+                              </>
+                            ) : (
+                              <>
+                                <CheckIcon className="mr-2 h-4 w-4" />
+                                Confirm Payment
+                              </>
+                            )}
+                          </button>
+                        )}
 
                         {/* Process Order Button */}
                         {selectedOrder.status === "payment_received" && (

@@ -51,9 +51,10 @@ export const useUpdateOrderStatus = () => {
 
 export const useVerifyPayment = () => {
   const queryClient = useQueryClient();
-
   return useMutation({
-    mutationFn: (id: string) => orderService.verifyPayment(id),
+    mutationFn: (id: string) => {
+      return orderService.verifyPayment(id);
+    },
     onSuccess: (data, variables) => {
       // Update the specific order in cache
       queryClient.setQueryData(orderKeys.detail(variables), data);
